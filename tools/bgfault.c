@@ -25,7 +25,7 @@
 #define BASE     "/var/lib/bootguard"
 #define BGCTL    "./cli/bgctl"
 #define BGD      "./daemon/bgd"
-#define HEALTH   "./scripts/health.sh"
+#define HEALTH   "./tools/bghealth"
 #define IMG1     "/tmp/bgfault_v1.img"
 #define IMG2     "/tmp/bgfault_v2.img"
 #define BREAK_A  "/tmp/bg_break_A"
