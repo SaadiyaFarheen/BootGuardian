@@ -11,3 +11,4 @@ daemon/bgd
 cli/bgctl
 tools/bgfault
 tools/bghealth
+*.save*
