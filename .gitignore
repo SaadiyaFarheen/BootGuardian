@@ -7,3 +7,4 @@
 Module.symvers
 modules.order
 tools/bgtest
+daemon/bgd
