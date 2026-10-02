@@ -1,0 +1,9 @@
+BootGuardian resilience report - Fri Oct  2 13:19:45 2026
+
+bad-update           PASS   13s  update to a corrupted image in slot B
+broken-boot          PASS   12s  slot A boots but its service never becomes healthy
+runtime-hang         PASS   19s  slot A boots fine, then hangs after confirmation
+both-bad             PASS   19s  both slots corrupted
+interrupted-update   PASS    3s  power cut mid-update leaves a partial image
+
+RESULT: 5/5 scenarios recovered correctly

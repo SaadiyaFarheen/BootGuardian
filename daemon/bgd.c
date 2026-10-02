@@ -28,6 +28,8 @@ static const char *state_path = "/var/lib/bootguard/state";
 static const char *health_cmd = "true";
 static unsigned interval = 1;
 static unsigned confirm_after = 2;
+static unsigned rollbacks;            /* consecutive rollbacks without a confirmed boot */
+static unsigned max_rollbacks = 2;    /* then enter rescue mode */
 
 static void on_signal(int sig) { (void)sig; running = 0; }
 
@@ -146,40 +148,82 @@ static int run_health(unsigned slot)
 	return rc != -1 && WIFEXITED(rc) && WEXITSTATUS(rc) == 0;
 }
 
-static void handle_event(int fd)
+/* Rescue mode: every slot failed. Stop booting, save diagnostics. */
+static void rescue_mode(int fd)
+{
+	struct bg_status s;
+	char dir[256], path[300];
+	char *slash;
+	time_t now = time(NULL);
+	FILE *f;
+
+	snprintf(dir, sizeof(dir), "%s", state_path);
+	slash = strrchr(dir, '/');
+	if (slash)
+		*slash = '\0';
+	else
+		snprintf(dir, sizeof(dir), ".");
+	snprintf(path, sizeof(path), "%s/rescue.log", dir);
+
+	logmsg("** RESCUE MODE ** all slots failed after %u rollbacks", rollbacks);
+	if (get_status(fd, &s) == 0) {
+		f = fopen(path, "a");
+		if (f) {
+			fprintf(f, "=== RESCUE MODE entered %s", ctime(&now));
+			fprintf(f, "active_slot=%c attempts=%u/%u watchdog_fires=%u heartbeats=%u rollbacks=%u\n",
+				s.active_slot ? 'B' : 'A', s.boot_attempts, s.max_attempts,
+				s.watchdog_fires, s.heartbeats, rollbacks);
+			fclose(f);
+			logmsg("diagnostics written to %s", path);
+		}
+	}
+	logmsg("boot loop halted. Recover with: bgctl status ; bgctl init <known-good-image>");
+}
+
+/* returns 1 when rescue mode was entered */
+static int handle_event(int fd)
 {
 	struct bg_status s;
 
 	if (get_status(fd, &s) < 0)
-		return;
-	if (s.rollback_pending)
+		return 0;
+	if (s.rollback_pending) {
+		rollbacks++;
 		logmsg("!! ROLLBACK: attempts exhausted, switching to slot %c",
 		       s.active_slot ? 'B' : 'A');
-	else
+	} else {
 		logmsg("!! WATCHDOG fired: no healthy heartbeat");
+	}
 
 	ioctl(fd, BG_IOC_ACK_EVENT);
+	persist_from_driver(fd);
+	if (rollbacks >= max_rollbacks) {
+		rescue_mode(fd);
+		return 1;
+	}
 	logmsg("simulating reboot...");
 	boot_sequence(fd);
+	return 0;
 }
 
 static void usage(const char *p)
 {
-	fprintf(stderr, "usage: %s [-s statefile] [-c healthcmd] [-i interval_sec] [-n confirm_after]\n", p);
+	fprintf(stderr, "usage: %s [-s statefile] [-c healthcmd] [-i interval_sec] [-n confirm_after] [-r max_rollbacks]\n", p);
 	exit(1);
 }
 
 int main(int argc, char **argv)
 {
 	unsigned slot, attempts, good = 0;
-	int fd, opt, confirmed = 0;
+	int fd, opt, confirmed = 0, rc = 0;
 
-	while ((opt = getopt(argc, argv, "s:c:i:n:h")) != -1) {
+	while ((opt = getopt(argc, argv, "s:c:i:n:r:h")) != -1) {
 		switch (opt) {
 		case 's': state_path = optarg; break;
 		case 'c': health_cmd = optarg; break;
 		case 'i': interval = atoi(optarg); break;
 		case 'n': confirm_after = atoi(optarg); break;
+		case 'r': max_rollbacks = atoi(optarg); break;
 		default: usage(argv[0]);
 		}
 	}
@@ -213,7 +257,10 @@ int main(int argc, char **argv)
 			break;
 		}
 		if (r > 0 && (p.revents & POLLIN)) {
-			handle_event(fd);
+			if (handle_event(fd)) {
+				rc = 2;
+				break;
+			}
 			good = 0;
 			confirmed = 0;
 			continue;
@@ -231,6 +278,7 @@ int main(int argc, char **argv)
 				if (good >= confirm_after) {
 					ioctl(fd, BG_IOC_CONFIRM_BOOT);
 					confirmed = 1;
+					rollbacks = 0;
 					persist_from_driver(fd);
 					logmsg("** BOOT CONFIRMED on slot %c **",
 					       s.active_slot ? 'B' : 'A');
@@ -245,5 +293,5 @@ int main(int argc, char **argv)
 
 	logmsg("shutting down");
 	close(fd);
-	return 0;
+	return rc;
 }
