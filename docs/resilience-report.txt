@@ -1,4 +1,4 @@
-BootGuardian resilience report - Fri Oct  2 13:38:10 2026
+BootGuardian resilience report - Sun Oct  4 13:16:28 2026
 
 bad-update           PASS   12s  update to a corrupted image in slot B
 broken-boot          PASS   12s  slot A boots but its service never becomes healthy
